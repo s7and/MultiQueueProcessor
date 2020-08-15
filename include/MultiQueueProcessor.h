@@ -3,6 +3,13 @@
 #include <list>
 #include <thread>
 #include <mutex>
+#include <functional>
+#include <unistd.h>
+#include <iostream>
+
+#ifndef Sleep
+# define Sleep(x) usleep(x)
+#endif
 
 template<typename Key, typename Value>
 struct IConsumer
@@ -16,12 +23,14 @@ struct IConsumer
 
 #define MaxCapacity 1000
 
+
 template<typename Key, typename Value>
 class MultiQueueProcessor
 {
 public:
 	MultiQueueProcessor() :
 		running{ true },
+		
 		th(std::bind(&MultiQueueProcessor::Process, this)) {}
 
 	~MultiQueueProcessor()
@@ -95,7 +104,7 @@ protected:
 	{
 		while (running)
 		{
-			Sleep(10);
+			Sleep(1);
 			std::lock_guard<std::recursive_mutex> lock{ mtx };
 			for (auto iter = queues.begin(); iter != queues.end(); ++iter)
 			{
