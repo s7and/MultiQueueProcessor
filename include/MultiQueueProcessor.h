@@ -9,6 +9,7 @@
 #include <thread>
 #include <unistd.h>
 
+#include "ThreadFiberPool.hpp"
 #include <boost/lockfree/queue.hpp>
 
 template <typename Key, typename Value> struct IConsumer {
@@ -30,7 +31,7 @@ template <typename Key, typename Value, size_t BufferSize> struct Subscriber {
   bool exit = false;
 
   Subscriber() = delete;
-  Subscriber(const Key& key, IConsumer<Key, Value> *consumer)
+  Subscriber(const Key &key, IConsumer<Key, Value> *consumer)
       : key_(key), consumer_(consumer){};
   ~Subscriber() { exit = true; }
   Subscriber(const Subscriber &) = delete;
@@ -49,49 +50,67 @@ template <typename Key, typename Value, size_t BufferSize> struct Subscriber {
   }
 };
 
-template <typename Key, typename Value, size_t BufferSize = 1000>
+template <typename Key, typename Value, size_t BufferSize>
+void Process(
+    eventFiber &exit, const Key &key,
+    boost::lockfree::queue<Value, boost::lockfree::fixed_sized<true>,
+                           boost::lockfree::capacity<BufferSize>> &queue,
+    IConsumer<Key, Value> *consumer) {
+  while (!exit.WaitForEvent(1)) {
+    int cnt = 0;
+    Value v;
+    while (queue.pop(v) && cnt++ < BufferSize / 10)
+      consumer->Consume(key, v);
+  }
+}
+
+template <typename Key, typename Value, size_t BufferSize = 512,
+          size_t ThreadCount = 4, size_t MaxQueues = 128>
 class MultiQueueProcessor {
   using lockfree_queue =
       boost::lockfree::queue<Value, boost::lockfree::fixed_sized<true>,
                              boost::lockfree::capacity<BufferSize>>;
   using Consumer = Subscriber<Key, Value, BufferSize>;
   using Consumer_ptr = std::unique_ptr<Consumer>;
+  using threadPool_t = ThreadFiberPool::ThreadPool<Key, lockfree_queue &,
+                                                   IConsumer<Key, Value> *>;
 
 public:
-  MultiQueueProcessor() {
-    worker_ = std::thread(&MultiQueueProcessor::Process, this);
-  }
-  ~MultiQueueProcessor() {
-    exit = true;
-    worker_.join();
-  }
-  void Subscribe(const Key& id, IConsumer<Key, Value> *consumer) {
+  MultiQueueProcessor() = default;
+  MultiQueueProcessor(const MultiQueueProcessor &) = delete;
+  MultiQueueProcessor &operator=(const MultiQueueProcessor &) = delete;
+  MultiQueueProcessor(MultiQueueProcessor &&) = default;
+  MultiQueueProcessor &operator=(MultiQueueProcessor &&) = default;
+  ~MultiQueueProcessor() = default;
+  bool Subscribe(const Key &id, IConsumer<Key, Value> *consumer) {
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
-    subscribers.try_emplace(id, std::make_unique<Consumer>(id, consumer));
+    if (MaxQueues == subscribers.size())
+      return false;
+    auto [iter, ok] =
+        subscribers.try_emplace(id, std::make_unique<Consumer>(id, consumer));
+    if (!ok)
+      return false;
+    threadPool.Add(id, (*iter).second->values_, consumer);
+    return true;
   }
-  void Unsubscribe(const Key& id) {
+  bool Unsubscribe(const Key &id) {
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
-    subscribers.erase(id);
+    if( threadPool.Delete(id) ) {
+      subscribers.erase(id);
+      return true;
+    }
+    return false;
   }
-  void Enqueue(const Key& id, Value value) {
+  void Enqueue(const Key &id, Value value) {
     std::shared_lock<std::shared_mutex> lock{consumersMtx};
     auto pos = subscribers.find(id);
     if (pos == subscribers.end())
       return;
     pos->second->Add(std::move(value));
   }
-  void Process() {
-    while (!exit) {
-      std::shared_lock<std::shared_mutex> lock{consumersMtx};
-      for (auto &i : subscribers) {
-        i.second->Call();
-      }
-    }
-  }
 
 protected:
   std::shared_mutex consumersMtx;
   std::map<Key, Consumer_ptr> subscribers;
-  std::thread worker_;
-  std::atomic<bool> exit{false};
+  threadPool_t threadPool{Process<Key, Value, BufferSize>, ThreadCount};
 };

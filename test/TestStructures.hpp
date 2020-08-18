@@ -42,7 +42,7 @@ struct Providers {
           mqproc.Enqueue(consumerKey, 1);
           sended++;
           now = std::chrono::system_clock::now();
-          // std::this_thread::sleep_for( std::chrono::seconds( 1 ));
+          // std::this_thread::sleep_for( std::chrono::milliseconds( 10 ));
         }
       }));
     };
