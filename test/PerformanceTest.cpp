@@ -33,8 +33,7 @@ int main(int argc, char **argv) {
     i.Join();
   std::this_thread::sleep_for(std::chrono::seconds(1));
   for (int i = 0; i < countCons; i++) {
-    std::cout << "Queue " << i << ": \n  Provided: " << providers[i].Sended()
-              << " Consumed: " << consumers[i].consumed << '\n';
+    std::cout << providers[i].Sended() << ", " << consumers[i].consumed << '\n';
   }
   return 0;
 }

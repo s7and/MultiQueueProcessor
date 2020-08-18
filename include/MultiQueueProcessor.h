@@ -10,6 +10,9 @@
 #include <unistd.h>
 
 #include <boost/fiber/buffered_channel.hpp>
+// #include<boost/lockfree/queue.hpp>
+
+#include "ThreadFiberPool.hpp"
 
 template <typename Key, typename Value> struct IConsumer {
   virtual void Consume(Key id, const Value &value) {
@@ -24,6 +27,18 @@ template <typename Key, typename Value> struct IConsumer {
 
 #define MaxCapacity 1000
 
+template<typename Key, typename Value>
+void Sender( eventFiber& exit, const Key& key, boost::fibers::buffered_channel<Value>& channel, IConsumer<Key, Value>* consumer_ ) {
+  Value v;
+  while( !exit.WaitForEvent(0) ) {
+    size_t count = 0;
+    while (channel.pop(v) == boost::fibers::channel_op_status::success) {
+      consumer_->Consume(key, v);
+      if( ++count == 10 ) break;
+    }
+  }
+};
+
 template <typename Key, typename Value, size_t BufferSize = 512>
 class Consumer {
   using Channel = boost::fibers::buffered_channel<Value>;
@@ -31,34 +46,38 @@ class Consumer {
   Channel channel{BufferSize};
   IConsumer<Key, Value> *consumer_;
   std::thread worker_;
-  void Process() {
-    Value v;
-    while (!channel.is_closed()) {
-      if (channel.pop(v) != boost::fibers::channel_op_status::success)
-        continue;
-      consumer_->Consume(key, v);
-    }
-  }
 public:
   Consumer(Key k, IConsumer<Key, Value> *c)
-      : key(k), consumer_(c), worker_(&Consumer::Process, this){};
+      : key(k), consumer_(c){};
   ~Consumer() {
     channel.close();
-    worker_.join();
   }
   void Add(Value &&val) { channel.push(std::move(val)); }
+  Channel& GetChannel(){ return channel; };
 };
 
-template <typename Key, typename Value, size_t BufferSize = 512>
+template <typename Key, typename Value, size_t BufferSize = 1024>
 class MultiQueueProcessor {
+  using Channel = boost::fibers::buffered_channel<Value>;
+  using fiberPool_t = ThreadFiberPool::ThreadPool<Key, Channel&, IConsumer<Key, Value>*>;
 public:
+  MultiQueueProcessor() {
+    threadPool = std::make_unique<fiberPool_t>( Sender<Key,Value>, 8 );
+  }
+  ~MultiQueueProcessor() {
+    threadPool.release();
+  }
   void Subscribe(const Key &id, IConsumer<Key, Value> *consumer) {
     std::lock_guard<std::shared_mutex> lock{consumersLock};
-    consumers.try_emplace(id, std::make_unique<Consumer_t>(id, consumer));
+    auto [data,ok] = consumers.try_emplace(id, std::make_unique<Consumer_t>(id, consumer));
+    if( !ok )
+      return;
+    threadPool->Add( id, (*data).second->GetChannel(), consumer );
   }
 
   void Unsubscribe(const Key &id) {
     std::lock_guard<std::shared_mutex> lock{consumersLock};
+    threadPool->Delete(id);
     consumers.erase(id);
   }
 
@@ -76,4 +95,6 @@ private:
 
   std::map<Key, consumer_ptr> consumers;
   std::shared_mutex consumersLock;
+
+  std::unique_ptr<fiberPool_t> threadPool;
 };
