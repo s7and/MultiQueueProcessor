@@ -1,22 +1,15 @@
 #pragma once
 #include <atomic>
-#include <condition_variable>
 #include <functional>
 #include <iostream>
-#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <queue>
-#include <set>
 #include <shared_mutex>
 #include <thread>
 #include <unistd.h>
-#include <unordered_map>
 
-#ifndef Sleep
-#define Sleep(x) usleep(x)
-#endif
+#include <boost/lockfree/queue.hpp>
 
 template <typename Key, typename Value> struct IConsumer {
   virtual void Consume(Key id, const Value &value) {
@@ -25,65 +18,42 @@ template <typename Key, typename Value> struct IConsumer {
   }
 };
 
-
 template <typename Key, typename Value, size_t BufferSize> struct Subscriber {
-  std::mutex lk_;
-  std::condition_variable dataCv_;
-  std::condition_variable addAvail_;
+  using lockfree_queue =
+      boost::lockfree::queue<Value, boost::lockfree::fixed_sized<true>,
+                             boost::lockfree::capacity<BufferSize>>;
 
   Key key_;
   IConsumer<Key, Value> *consumer_ = nullptr;
-  std::list<Value> values_;
-
+  lockfree_queue values_;
 
   bool exit = false;
 
   Subscriber() = delete;
-  Subscriber(Key key, IConsumer<Key, Value> *consumer)
-      : key_(key), consumer_(consumer) {
-    addAvail_.notify_one();
-  };
-  ~Subscriber() {
-    exit = true;
-  }
+  Subscriber(const Key& key, IConsumer<Key, Value> *consumer)
+      : key_(key), consumer_(consumer){};
+  ~Subscriber() { exit = true; }
   Subscriber(const Subscriber &) = delete;
   Subscriber &operator=(const Subscriber &) = delete;
   Subscriber(Subscriber &&rhs) = delete;
   Subscriber &operator=(Subscriber &&rhs) = delete;
   void Add(Value &&value) {
-    std::unique_lock<std::mutex> lk(lk_);
-    while (values_.size() == BufferSize) {
-      if (addAvail_.wait_for(lk, std::chrono::microseconds(10)) ==
-          std::cv_status::no_timeout)
-        break;
-    }
-    if (exit)
-      return;
-    values_.emplace_back(std::move(value));
-    if (values_.size() > BufferSize / 2)
-      dataCv_.notify_one();
+    while (!exit && !values_.push(std::move(value)))
+      std::this_thread::sleep_for(std::chrono::nanoseconds(1));
   }
-  bool Get(std::list<Value> &cp) {
-    std::unique_lock<std::mutex> lk(lk_);
-    while (!exit && values_.size() == 0) {
-      if (dataCv_.wait_for(lk, std::chrono::microseconds(10)) ==
-          std::cv_status::timeout)
-        return false;
-    }
-    if (exit)
-      return false;
-    std::swap(cp, values_);
-    addAvail_.notify_one();
-    return true;
-  }
-  void Call(std::list<Value> &cp) {
-    for (auto &i : cp)
-      consumer_->Consume(key_, i);
+  void Call() {
+    Value v;
+    int cnt = 0;
+    while (values_.pop(v) && cnt++ < 5)
+      consumer_->Consume(key_, v);
   }
 };
 
-template <typename Key, typename Value, size_t BufferSize = 20000>
+template <typename Key, typename Value, size_t BufferSize = 1000>
 class MultiQueueProcessor {
+  using lockfree_queue =
+      boost::lockfree::queue<Value, boost::lockfree::fixed_sized<true>,
+                             boost::lockfree::capacity<BufferSize>>;
   using Consumer = Subscriber<Key, Value, BufferSize>;
   using Consumer_ptr = std::unique_ptr<Consumer>;
 
@@ -95,15 +65,15 @@ public:
     exit = true;
     worker_.join();
   }
-  void Subscribe(Key id, IConsumer<Key, Value> *consumer) {
+  void Subscribe(const Key& id, IConsumer<Key, Value> *consumer) {
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
     subscribers.try_emplace(id, std::make_unique<Consumer>(id, consumer));
   }
-  void Unsubscribe(Key id) {
+  void Unsubscribe(const Key& id) {
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
     subscribers.erase(id);
   }
-  void Enqueue(Key id, Value value) {
+  void Enqueue(const Key& id, Value value) {
     std::shared_lock<std::shared_mutex> lock{consumersMtx};
     auto pos = subscribers.find(id);
     if (pos == subscribers.end())
@@ -114,10 +84,7 @@ public:
     while (!exit) {
       std::shared_lock<std::shared_mutex> lock{consumersMtx};
       for (auto &i : subscribers) {
-        std::list<Value> cp;
-        if (!i.second->Get(cp))
-          continue;
-        i.second->Call(cp);
+        i.second->Call();
       }
     }
   }

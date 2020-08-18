@@ -16,7 +16,7 @@ int main() {
     for (int i = 0; i < 10; i++) {
       queue.Enqueue(1, i);
     }
-    Sleep(1000);
+    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
   return tc.consumed != std::vector{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 }
