@@ -8,7 +8,7 @@ int main(int , char **) {
   const size_t countCons = 16;
   const size_t countThreads = 16;
   const size_t BufferSize = 512;
-  MultiQueueProcessor<int, int> mqproc;
+  MQProcessor::Queue<int, int> mqproc;
   std::vector<TestConsumer> consumers(countCons, TestConsumer());
   std::vector<Providers<BufferSize>> providers;
   for (int i = 0; i < countCons; i++)
