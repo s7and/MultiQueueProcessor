@@ -11,7 +11,8 @@ pthread.
 I've used conan as package manager to get boost.
 
 # Usage
-include <MultiQueueProcessor.h.
+#include "include/MultiQueueProcessor.h"
+
 Example:
 ```
   struct IConsumerClass : IConsumer<std::string, int> {
