@@ -10,6 +10,9 @@ add_executable(SubUnsubTest SubUnsubTest.cpp)
 target_link_libraries(SubUnsubTest MultiQueueProcessor Threads::Threads)
 set_property(TARGET SubUnsubTest PROPERTY CXX_STANDARD 17)
 
+add_executable(DummyTest DummyTest.cpp)
+target_link_libraries(DummyTest MultiQueueProcessor Threads::Threads)
+set_property(TARGET DummyTest PROPERTY CXX_STANDARD 17)
 
 add_test(NAME BasicSingleTest COMMAND BasicSingleTest)
 add_test(NAME PerformanceTest1x4 COMMAND PerformanceTest 1 4)
