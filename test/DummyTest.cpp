@@ -1,11 +1,9 @@
 #include "MultiQueueProcessor.h"
 #include "TestStructures.hpp"
 #include <chrono>
+#include <iostream>
 #include <thread>
 #include <vector>
-#include <iostream>
-
-
 
 int main(int argc, char **argv) {
   if (argc < 3) {
@@ -25,8 +23,8 @@ int main(int argc, char **argv) {
   const size_t BufferSize = 512;
   MQProcessor::Queue<int, int> mqproc;
   std::vector<TestConsumer> consumers(countCons, TestConsumer());
-  std::vector<Providers<BufferSize,true>> providers;
-  for (int i = 0; i < countCons; i++)
+  std::vector<Providers<BufferSize, true>> providers;
+  for (size_t i = 0; i < countCons; i++)
     mqproc.Subscribe(i, &consumers[i]);
   return 0;
 }

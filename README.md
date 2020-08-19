@@ -35,6 +35,8 @@ Example:
   mq.Unsubscribe(key);                              // Unsubscribe from queue  
 ```
 
+Value supports only trivial assignable and trivial destructible types.
+
 More examples in /test folder.
 
 # Alternative Version:
