@@ -131,7 +131,6 @@ namespace ThreadFiberPool {
       min->get()->Add( id, args... );
     }
     bool Delete( const Id& id ) {
-      int cnt = 0;
       for( auto& i : pool ) {
         if( i->Delete(id) )
           return true;
