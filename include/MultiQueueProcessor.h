@@ -1,22 +1,14 @@
 #pragma once
 #include <atomic>
 #include <condition_variable>
-#include <functional>
-#include <iostream>
 #include <list>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <queue>
-#include <set>
 #include <shared_mutex>
 #include <thread>
-#include <unistd.h>
-#include <unordered_map>
+#include <vector>
 
-#ifndef Sleep
-#define Sleep(x) usleep(x)
-#endif
 
 template <typename Key, typename Value> struct IConsumer {
   virtual void Consume(Key id, const Value &value) {
@@ -25,28 +17,33 @@ template <typename Key, typename Value> struct IConsumer {
   }
 };
 
-template <typename Key, typename Value, size_t BufferSize> struct Subscriber {
+template <typename Key, typename Value, size_t BufferSize, size_t ThreadCount> class Subscriber {
+  using consumer_t = IConsumer<Key, Value>*;
+
   std::mutex lk_;
   std::condition_variable dataCv_;
   std::condition_variable addAvail_;
 
   Key key_;
-  IConsumer<Key, Value> *consumer_ = nullptr;
+  consumer_t consumer_ = nullptr;
   std::list<Value> values_;
 
-  std::thread worker_;
+  std::vector<std::thread> workers_;
 
-  bool exit = false;
+  std::atomic<bool> exit{false};
 
+public:
   Subscriber() = delete;
-  Subscriber(Key key, IConsumer<Key, Value> *consumer)
+  Subscriber(Key key, consumer_t consumer)
       : key_(key), consumer_(consumer) {
+    for( auto i = 0; i < ThreadCount; i++ )
+      workers_.emplace_back( std::thread(&Subscriber::Process, this) );
     addAvail_.notify_one();
-    worker_ = std::thread(&Subscriber::Process, this);
   };
   ~Subscriber() {
     exit = true;
-    worker_.join();
+    for( auto& i : workers_ )
+      i.join();
   }
   Subscriber(const Subscriber &) = delete;
   Subscriber &operator=(const Subscriber &) = delete;
@@ -54,7 +51,7 @@ template <typename Key, typename Value, size_t BufferSize> struct Subscriber {
   Subscriber &operator=(Subscriber &&rhs) = delete;
   void Add(Value &&value) {
     std::unique_lock<std::mutex> lk(lk_);
-    while (values_.size() == BufferSize) {
+    while (!exit && values_.size() == BufferSize) {
       if (addAvail_.wait_for(lk, std::chrono::microseconds(1)) ==
           std::cv_status::no_timeout)
         break;
@@ -64,6 +61,9 @@ template <typename Key, typename Value, size_t BufferSize> struct Subscriber {
     values_.emplace_back(std::move(value));
     if (values_.size() > BufferSize / 2)
       dataCv_.notify_one();
+  }
+  void SetExit() {
+    exit = true;
   }
   bool Get(std::list<Value> &cp) {
     std::unique_lock<std::mutex> lk(lk_);
@@ -81,30 +81,47 @@ template <typename Key, typename Value, size_t BufferSize> struct Subscriber {
   void Process() {
     std::list<Value> cp;
     while (Get(cp)) {
-      for (auto &i : cp)
+      for (auto &i : cp) {
         consumer_->Consume(key_, i);
+        if( exit ) 
+          break;
+      }
       cp.clear();
     }
   }
 };
 
-template <typename Key, typename Value, size_t BufferSize = 1000>
+template <typename Key, typename Value, size_t BufferSize = 1024, size_t ThreadCount = 4>
 class MultiQueueProcessor {
-  using Consumer = Subscriber<Key, Value, BufferSize>;
-  using Consumer_ptr = std::unique_ptr<Consumer>;
-
+  using consumer_t = IConsumer<Key, Value>*;
+  using subscriber_t = Subscriber<Key, Value, BufferSize, ThreadCount>;
+  using subscriber_ptr = std::unique_ptr<subscriber_t>;
 public:
-  MultiQueueProcessor() {}
-  ~MultiQueueProcessor() { subscribers.clear(); }
-  void Subscribe(Key id, IConsumer<Key, Value> *consumer) {
+  MultiQueueProcessor() = default;
+  MultiQueueProcessor( const MultiQueueProcessor&) = delete;
+  MultiQueueProcessor& operator=( const MultiQueueProcessor&) = delete;
+  MultiQueueProcessor(MultiQueueProcessor&&) = default;
+  MultiQueueProcessor& operator=(MultiQueueProcessor&&) = default;
+  ~MultiQueueProcessor() {
+    exit = true;
+    for( auto& i : subscribers )
+      i.second->SetExit();
+  }
+  void Subscribe(Key id, consumer_t consumer) {
+    if( exit )
+      return;
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
-    subscribers.try_emplace(id, std::make_unique<Consumer>(id, consumer));
+    subscribers.try_emplace(id, std::make_unique<subscriber_t>(id, consumer));
   }
   void Unsubscribe(Key id) {
+    if( exit )
+      return;
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
     subscribers.erase(id);
   }
   void Enqueue(Key id, Value value) {
+    if( exit )
+      return;
     std::shared_lock<std::shared_mutex> lock{consumersMtx};
     auto pos = subscribers.find(id);
     if (pos == subscribers.end())
@@ -112,8 +129,8 @@ public:
     pos->second->Add(std::move(value));
   }
 
-protected:
+private:
+  std::atomic<bool> exit{false};
   std::shared_mutex consumersMtx;
-  std::map<Key, Consumer_ptr> subscribers;
-  std::thread worker_;
+  std::map<Key, subscriber_ptr> subscribers;
 };

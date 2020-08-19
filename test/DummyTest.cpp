@@ -23,11 +23,11 @@ int main(int argc, char **argv) {
   const size_t BufferSize = 512;
   MultiQueueProcessor<int, int, BufferSize> mqproc;
   std::vector<TestConsumer> consumers(countCons, TestConsumer());
-  std::vector<Providers<BufferSize>> providers;
+  std::vector<Providers<BufferSize,true>> providers;
   for (int i = 0; i < countCons; i++)
     mqproc.Subscribe(i, &consumers[i]);
   for (int i = 0; i < countCons; i++)
-    providers.emplace_back(Providers<BufferSize>(mqproc, countThreads, i));
+    providers.emplace_back(Providers<BufferSize,true>(mqproc, countThreads, i));
   for (auto &i : providers)
     i.Start();
   for (auto &i : providers)

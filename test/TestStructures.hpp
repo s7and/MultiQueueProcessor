@@ -11,7 +11,7 @@
   uint64_t consumed = 0;
 };
 
-template<size_t BufferSize>
+template<size_t BufferSize, bool dummy = false>
 struct Providers {
   std::vector<std::thread> workers;
   std::atomic<uint64_t> sended{0};
@@ -42,7 +42,8 @@ struct Providers {
           mqproc.Enqueue(consumerKey, 1);
           sended++;
           now = std::chrono::system_clock::now();
-          // std::this_thread::sleep_for( std::chrono::seconds( 1 ));
+          if( dummy)
+            std::this_thread::sleep_for( std::chrono::seconds( 1 ));
         }
       }));
     };
