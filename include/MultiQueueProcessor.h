@@ -17,23 +17,26 @@ template <typename Key, typename Value> struct IConsumer {
   }
 };
 
-template <typename Key, typename Value, size_t BufferSize, size_t ThreadCount> class Subscriber {
-  static constexpr size_t bufferDevider = ThreadCount == 1 ? 2 : ThreadCount;
+template <typename Key, typename Value> class Subscriber {
   using consumer_t = IConsumer<Key, Value>*;
+  const size_t BufferSize = 1024;
+  const size_t ThreadCount = 4;
+  const size_t bufferDivider = ThreadCount == 1 ? 2 : ThreadCount;
 
   std::mutex lk_;
   std::condition_variable dataCv_;
   std::condition_variable addAvail_;
 
-  Key key_;
-  consumer_t consumer_ = nullptr;
+  const Key key_;
+  const consumer_t consumer_ = nullptr;
   std::atomic<bool> exit{false};
   std::vector<std::thread> workers_;
 
   std::list<Value> values_;
 public:
-  Subscriber(const Key& key, const consumer_t consumer)
-      : key_(key), consumer_(consumer) {
+  Subscriber(const Key& key, const consumer_t consumer, const size_t bufferSize, const size_t threadCount)
+      : BufferSize(bufferSize), ThreadCount(threadCount), key_(key), consumer_(consumer),
+        bufferDivider(ThreadCount == 1 ? 2 : ThreadCount) {
     for( auto i = 0; i < ThreadCount; i++ )
       workers_.emplace_back( std::thread(&Subscriber::Process, this) );
     addAvail_.notify_one();
@@ -57,7 +60,7 @@ public:
     if (exit)
       return;
     values_.emplace_back(std::move(value));
-    if (values_.size() > BufferSize / bufferDevider)
+    if (values_.size() > BufferSize / bufferDivider)
       dataCv_.notify_one();
   }
   void SetExit() {
@@ -89,13 +92,21 @@ public:
   }
 };
 
-template <typename Key, typename Value, size_t BufferSize = 1024, size_t ThreadCount = 4>
+template <typename Key, typename Value>
 class MultiQueueProcessor {
   using consumer_t = IConsumer<Key, Value>*;
-  using subscriber_t = Subscriber<Key, Value, BufferSize, ThreadCount>;
+  using subscriber_t = Subscriber<Key, Value>;
   using subscriber_ptr = std::unique_ptr<subscriber_t>;
 public:
-  MultiQueueProcessor() = default;
+  MultiQueueProcessor( const size_t bufferSize = 1024, const size_t threadCount = 8, const size_t maxSubscribers = 64 ) 
+    : BufferSize(bufferSize), ThreadCount(threadCount), MaxSubscribers(maxSubscribers) {
+      if( bufferSize == 0 )
+        throw std::runtime_error("MultiQueueProcessor Wrong Arguments");
+      if( threadCount == 0 )
+        throw std::runtime_error("MultiQueueProcessor Wrong Arguments");
+      if( maxSubscribers == 0 || maxSubscribers > 64 )
+        throw std::runtime_error("MultiQueueProcessor Wrong Arguments");
+    };
   MultiQueueProcessor( const MultiQueueProcessor&) = delete;
   MultiQueueProcessor& operator=( const MultiQueueProcessor&) = delete;
   MultiQueueProcessor(MultiQueueProcessor&&) = default;
@@ -105,29 +116,36 @@ public:
     for( auto& i : subscribers )
       i.second->SetExit();
   }
-  void Subscribe(const Key& id, const consumer_t consumer) {
+  bool Subscribe(const Key& id, const consumer_t consumer) {
     if( exit )
-      return;
+      return false;
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
-    subscribers.try_emplace(id, std::make_unique<subscriber_t>(id, consumer));
+    if( MaxSubscribers <= subscribers.size()  )
+      return false;
+    auto [iter, ok] = subscribers.try_emplace(id, std::make_unique<subscriber_t>(id, consumer, BufferSize, ThreadCount));
+    return ok;
   }
-  void Unsubscribe(const Key& id) {
+  bool Unsubscribe(const Key& id) {
     if( exit )
-      return;
+      return false;
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
-    subscribers.erase(id);
+    return subscribers.erase(id);
   }
-  void Enqueue(const Key& id, Value value) {
+  bool Enqueue(const Key& id, Value value) {
     if( exit )
-      return;
+      return false;
     std::shared_lock<std::shared_mutex> lock{consumersMtx};
     auto pos = subscribers.find(id);
     if (pos == subscribers.end())
-      return;
+      return false;
     pos->second->Add(std::move(value));
+    return true;
   }
 
 private:
+  const size_t BufferSize = 1024;
+  const size_t ThreadCount = 2;
+  const size_t MaxSubscribers = 64;
   std::atomic<bool> exit{false};
   std::shared_mutex consumersMtx;
   std::map<Key, subscriber_ptr> subscribers;

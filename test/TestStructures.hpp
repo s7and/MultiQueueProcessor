@@ -16,9 +16,9 @@ struct Providers {
   std::vector<std::thread> workers;
   std::atomic<uint64_t> sended{0};
   const size_t countThreads;
-  MultiQueueProcessor<int, int, BufferSize> &mqproc;
+  MultiQueueProcessor<int, int> &mqproc;
   const int consumerKey;
-  Providers(MultiQueueProcessor<int, int, BufferSize> &mq, const size_t count,
+  Providers(MultiQueueProcessor<int, int> &mq, const size_t count,
             const int consumer)
       : mqproc(mq), countThreads(count), consumerKey(consumer){};
   Providers(const Providers &) = delete;
