@@ -3,6 +3,9 @@
 #include <chrono>
 #include <thread>
 #include <vector>
+#include <iostream>
+
+
 
 int main(int argc, char **argv) {
   if (argc < 3) {
@@ -19,20 +22,11 @@ int main(int argc, char **argv) {
     std::cout << "Wrong countThreads!\n";
     return 1;
   }
-  const size_t BufferSize = 1024;
-  MQProcessor::Queue<int, int, BufferSize> mqproc;
+  const size_t BufferSize = 512;
+  MQProcessor::Queue<int, int> mqproc;
   std::vector<TestConsumer> consumers(countCons, TestConsumer());
-  std::vector<Providers<BufferSize>> providers;
+  std::vector<Providers<BufferSize,true>> providers;
   for (int i = 0; i < countCons; i++)
     mqproc.Subscribe(i, &consumers[i]);
-  for (int i = 0; i < countCons; i++)
-    providers.emplace_back(Providers<BufferSize>(mqproc, countThreads, i));
-  for (auto &i : providers)
-    i.Start();
-  for (auto &i : providers)
-    i.Join();
-  for (int i = 0; i < countCons; i++) {
-    std::cout << providers[i].Sended() << ", " << consumers[i].consumed << '\n';
-  }
   return 0;
 }

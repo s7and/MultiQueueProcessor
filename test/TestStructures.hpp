@@ -7,17 +7,18 @@
 #include <atomic>
 
  struct TestConsumer : IConsumer<int, int> {
-  void Consume(int id, const int &value) override { consumed++; }
+  void Consume( const int& , const int& ) override { consumed++; }
   uint64_t consumed = 0;
 };
 
+template<size_t BufferSize, bool dummy = false>
 struct Providers {
   std::vector<std::thread> workers;
   std::atomic<uint64_t> sended{0};
   const size_t countThreads;
-  MultiQueueProcessor<int, int> &mqproc;
+  MQProcessor::Queue<int, int, BufferSize> &mqproc;
   const int consumerKey;
-  Providers(MultiQueueProcessor<int, int> &mq, const size_t count,
+  Providers(MQProcessor::Queue<int, int, BufferSize> &mq, const size_t count,
             const int consumer)
       : mqproc(mq), countThreads(count), consumerKey(consumer){};
   Providers(const Providers &) = delete;
@@ -37,11 +38,12 @@ struct Providers {
         auto start = std::chrono::system_clock::now();
         auto now = std::chrono::system_clock::now();
         while (std::chrono::duration_cast<std::chrono::seconds>(now - start)
-                   .count() < 1) {
+                   .count() < 1 ) {
           mqproc.Enqueue(consumerKey, 1);
           sended++;
           now = std::chrono::system_clock::now();
-          std::this_thread::sleep_for(std::chrono::microseconds(100));
+          if( dummy )
+            std::this_thread::sleep_for( std::chrono::seconds( 1 ));
         }
       }));
     };
