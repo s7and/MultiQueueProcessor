@@ -7,7 +7,6 @@
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
-#include <unistd.h>
 
 #include "ThreadFiberPool.hpp"
 #include <boost/lockfree/queue.hpp>
@@ -65,7 +64,7 @@ void Process(
 }
 
 template <typename Key, typename Value, size_t BufferSize = 512,
-          size_t ThreadCount = 4, size_t MaxQueues = 128>
+          size_t ThreadCount = 8, size_t MaxQueues = 128>
 class MultiQueueProcessor {
   using lockfree_queue =
       boost::lockfree::queue<Value, boost::lockfree::fixed_sized<true>,
@@ -76,7 +75,10 @@ class MultiQueueProcessor {
                                                    IConsumer<Key, Value> *>;
 
 public:
-  MultiQueueProcessor() = default;
+  MultiQueueProcessor() {
+    static_assert( ThreadCount > 0, "Wrong Thread Count" );
+    static_assert( BufferSize > 0, "Wrong Buffer Size" );
+  };
   MultiQueueProcessor(const MultiQueueProcessor &) = delete;
   MultiQueueProcessor &operator=(const MultiQueueProcessor &) = delete;
   MultiQueueProcessor(MultiQueueProcessor &&) = default;
