@@ -18,6 +18,7 @@ template <typename Key, typename Value> struct IConsumer {
 };
 
 template <typename Key, typename Value, size_t BufferSize, size_t ThreadCount> class Subscriber {
+  static constexpr size_t bufferDevider = ThreadCount == 1 ? 2 : ThreadCount;
   using consumer_t = IConsumer<Key, Value>*;
 
   std::mutex lk_;
@@ -26,15 +27,12 @@ template <typename Key, typename Value, size_t BufferSize, size_t ThreadCount> c
 
   Key key_;
   consumer_t consumer_ = nullptr;
-  std::list<Value> values_;
-
+  std::atomic<bool> exit{false};
   std::vector<std::thread> workers_;
 
-  std::atomic<bool> exit{false};
-
+  std::list<Value> values_;
 public:
-  Subscriber() = delete;
-  Subscriber(Key key, consumer_t consumer)
+  Subscriber(const Key& key, const consumer_t consumer)
       : key_(key), consumer_(consumer) {
     for( auto i = 0; i < ThreadCount; i++ )
       workers_.emplace_back( std::thread(&Subscriber::Process, this) );
@@ -59,7 +57,7 @@ public:
     if (exit)
       return;
     values_.emplace_back(std::move(value));
-    if (values_.size() > BufferSize / 2)
+    if (values_.size() > BufferSize / bufferDevider)
       dataCv_.notify_one();
   }
   void SetExit() {
@@ -68,7 +66,7 @@ public:
   bool Get(std::list<Value> &cp) {
     std::unique_lock<std::mutex> lk(lk_);
     while (!exit && values_.size() == 0) {
-      if (dataCv_.wait_for(lk, std::chrono::microseconds(10)) ==
+      if (dataCv_.wait_for(lk, std::chrono::microseconds(1)) ==
           std::cv_status::no_timeout)
         break;
     }
@@ -107,19 +105,19 @@ public:
     for( auto& i : subscribers )
       i.second->SetExit();
   }
-  void Subscribe(Key id, consumer_t consumer) {
+  void Subscribe(const Key& id, const consumer_t consumer) {
     if( exit )
       return;
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
     subscribers.try_emplace(id, std::make_unique<subscriber_t>(id, consumer));
   }
-  void Unsubscribe(Key id) {
+  void Unsubscribe(const Key& id) {
     if( exit )
       return;
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
     subscribers.erase(id);
   }
-  void Enqueue(Key id, Value value) {
+  void Enqueue(const Key& id, Value value) {
     if( exit )
       return;
     std::shared_lock<std::shared_mutex> lock{consumersMtx};
