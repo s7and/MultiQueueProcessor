@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   const size_t BufferSize = 512;
-  MultiQueueProcessor<int, int> mqproc;
+  MQProcessor::Queue<int, int> mqproc;
   std::vector<TestConsumer> consumers(countCons, TestConsumer());
   std::vector<Providers<BufferSize,true>> providers;
   for (int i = 0; i < countCons; i++)

@@ -7,7 +7,7 @@
 #include <atomic>
 
  struct TestConsumer : IConsumer<int, int> {
-  void Consume( int , const int &) override { consumed++; }
+  void Consume( const int& , const int& ) override { consumed++; }
   uint64_t consumed = 0;
 };
 
@@ -16,9 +16,9 @@ struct Providers {
   std::vector<std::thread> workers;
   std::atomic<uint64_t> sended{0};
   const size_t countThreads;
-  MultiQueueProcessor<int, int, BufferSize> &mqproc;
+  MQProcessor::Queue<int, int, BufferSize> &mqproc;
   const int consumerKey;
-  Providers(MultiQueueProcessor<int, int, BufferSize> &mq, const size_t count,
+  Providers(MQProcessor::Queue<int, int, BufferSize> &mq, const size_t count,
             const int consumer)
       : mqproc(mq), countThreads(count), consumerKey(consumer){};
   Providers(const Providers &) = delete;
