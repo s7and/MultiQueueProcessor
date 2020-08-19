@@ -4,7 +4,7 @@
 #include <thread>
 #include <vector>
 
-int main(int argc, char **argv) {
+int main(int , char **) {
   const size_t countCons = 16;
   const size_t countThreads = 16;
   const size_t BufferSize = 512;

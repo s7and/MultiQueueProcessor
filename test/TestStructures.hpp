@@ -7,7 +7,7 @@
 #include <atomic>
 
  struct TestConsumer : IConsumer<int, int> {
-  void Consume( int id, const int &value) override { consumed++; }
+  void Consume( int , const int &) override { consumed++; }
   uint64_t consumed = 0;
 };
 

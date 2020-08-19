@@ -1,3 +1,6 @@
+#ifndef MULTIQUEUPROCESSOR
+# define MULTIQUEUPROCESSOR
+
 #pragma once
 #include <atomic>
 #include <condition_variable>
@@ -150,3 +153,5 @@ private:
   std::shared_mutex consumersMtx;
   std::map<Key, subscriber_ptr> subscribers;
 };
+
+#endif
