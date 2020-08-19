@@ -1,3 +1,6 @@
+#ifndef MULTIQUEUEPROCESSOR
+# define MULTIQUEUEPROCESSOR
+
 #pragma once
 #include <atomic>
 #include <functional>
@@ -83,8 +86,12 @@ public:
   MultiQueueProcessor &operator=(const MultiQueueProcessor &) = delete;
   MultiQueueProcessor(MultiQueueProcessor &&) = default;
   MultiQueueProcessor &operator=(MultiQueueProcessor &&) = default;
-  ~MultiQueueProcessor() = default;
+  ~MultiQueueProcessor() {
+    exit = true;
+  };
   bool Subscribe(const Key &id, IConsumer<Key, Value> *consumer) {
+    if( exit )
+      return false;
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
     if (MaxQueues == subscribers.size())
       return false;
@@ -96,6 +103,8 @@ public:
     return true;
   }
   bool Unsubscribe(const Key &id) {
+    if( exit )
+      return false;
     std::lock_guard<std::shared_mutex> lock{consumersMtx};
     if( threadPool.Delete(id) ) {
       subscribers.erase(id);
@@ -104,6 +113,8 @@ public:
     return false;
   }
   void Enqueue(const Key &id, Value value) {
+    if( exit )
+      return;
     std::shared_lock<std::shared_mutex> lock{consumersMtx};
     auto pos = subscribers.find(id);
     if (pos == subscribers.end())
@@ -112,7 +123,10 @@ public:
   }
 
 protected:
+  std::atomic<bool> exit{false};
   std::shared_mutex consumersMtx;
   std::map<Key, Consumer_ptr> subscribers;
   threadPool_t threadPool{Process<Key, Value, BufferSize>, ThreadCount};
 };
+
+#endif
