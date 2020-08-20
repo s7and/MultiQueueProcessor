@@ -4,7 +4,10 @@
 #include <vector>
 
 struct TestConsumer : IConsumer<int, int> {
-  void Consume(const int& id, const int &value) override { (void)id; consumed.push_back(value); }
+  void Consume(const int &id, const int &value) override {
+    (void)id;
+    consumed.push_back(value);
+  }
   std::vector<int> consumed;
 };
 
